@@ -76,6 +76,8 @@ export function calcTiles(
 	let x = 0;
 
 	for (const block of blocks) {
+		if (max >= channels) return []; // invalid
+
 		switch (block.type) {
 			case "repeat-begin":
 			case "repeat-end":
@@ -105,7 +107,6 @@ export function calcTiles(
 
 				for (let i = 0; i < GATE_BLOCKS[block.gate].binds.length; i++) {
 					const y = block.binds[i];
-					if (y >= channels) continue; // invalid
 
 					column[y] = {
 						type: block.gate == "swap" ? "swap" : (i ? "control" : "gate"),
