@@ -55,12 +55,14 @@ export default function App() {
 		} catch {}
 	}
 
+	const [editMode, setEditMode] = createSignal(true);
+
 	const [channels, setChannels] = createSignal(initChannels);
 
 	const [initialValues, setInitialValues] = createStore(initInitialValues);
 	const [blocks, setBlocks] = createStore(initBlocks);
 
-	const tiles = createMemo(() => calcTiles(channels(), blocks));
+	const tiles = createMemo(() => calcTiles(channels(), blocks, !editMode()));
 	const values = createMemo(() => calcValues(channels(), initialValues, blocks));
 
 	createEffect(() => {
@@ -92,6 +94,7 @@ export default function App() {
 		};
 
 	let channelsInput: HTMLInputElement | undefined;
+	let editModeInput: HTMLInputElement | undefined;
 
 	return <>
 		<nav>
@@ -104,11 +107,18 @@ export default function App() {
 
 			<div class="spacer"></div>
 
-			<p>Edit mode</p>
+			<input
+				ref={editModeInput}
+				id="edit-mode"
+				type="checkbox"
+				checked={editMode()}
+				onChange={() => setEditMode(editModeInput!.checked)}
+			/>
+			<label for="edit-mode">Edit mode</label>
 		</nav>
 
 		<main>
-			<div id="header">
+			{editMode() && <div id="header">
 				<div>
 					<div class="header-controls">
 						<button onClick={insert(0)}>＋</button>
@@ -164,7 +174,7 @@ export default function App() {
 				</For>
 
 				<div></div>
-			</div>
+			</div>}
 
 			<Index each={tiles()}>
 				{(row, i) => {

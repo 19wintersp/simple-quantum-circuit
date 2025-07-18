@@ -12,7 +12,7 @@ export function channelName(channel: number): string {
 	return out;
 };
 
-export function endingWire(tile: Tile): Wire {
+const endingWire = (tile: Tile): Wire => {
 	switch (tile.type) {
 		case "measure":
 			return tile.inverse ? "quantum" : "classical";
@@ -23,11 +23,40 @@ export function endingWire(tile: Tile): Wire {
 		default:
 			return tile.wire;
 	}
-}
+};
+
+const bounds = (block: Block, channels: number): [number, number] => {
+	switch (block.type) {
+		case "repeat-begin":
+		case "repeat-end":
+		case "medium":
+			return [0, channels - 1];
+
+		case "measure":
+			return [block.bind, block.bind];
+
+		case "gate":
+			return block.binds
+				.reduce(
+					([min, max], v) => [Math.min(min, v), Math.max(max, v)],
+					[block.binds[0], block.binds[0]],
+				);
+
+		case "oracle":
+			return [
+				Math.min(block.xBind, block.firstBind),
+				Math.max(block.xBind, block.firstBind + block.width - 1),
+			];
+	}
+};
+
+const rangeInclusive = (min: number, max: number): Set<number> =>
+	new Set(Array(1 + max - min).fill(0).map((_, i) => min + i));
 
 export function calcTiles(
 	channels: number,
 	blocks: Block[],
+	compact: boolean,
 ): Tile[][] {
 	let column: Tile[] = Array(channels)
 		.fill(null)
@@ -40,20 +69,15 @@ export function calcTiles(
 		.fill(null)
 		.map(() => []);
 
+	if (!blocks.length) return tiles;
+
+	let filled = new Set();
+	let [min, max] = bounds(blocks[0], channels);
+	let x = 0;
+
 	for (const block of blocks) {
 		switch (block.type) {
 			case "repeat-begin":
-				column = column.map((tile, i) => ({
-					type: "repeat",
-					connect: {
-						up: i > 0,
-						down: i + 1 < channels,
-					},
-					side: "begin",
-					wire: endingWire(tile),
-				}));
-				break;
-
 			case "repeat-end":
 				column = column.map((tile, i) => ({
 					type: "repeat",
@@ -61,38 +85,23 @@ export function calcTiles(
 						up: i > 0,
 						down: i + 1 < channels,
 					},
-					side: "end",
-					count: block.count,
+					side: block.type == "repeat-begin" ? "begin" : "end",
+					...(block.type == "repeat-end" && { count: block.count }),
 					wire: endingWire(tile),
-				}));
+				} as Tile));
 				break;
 
 			case "measure":
-				column = column.map((tile, i) => (
-					i == block.bind
-						? {
-								type: "measure",
-								inverse: false,
-							}
-						: {
-								type: "wire",
-								crossing: null,
-								wire: endingWire(tile),
-							}
-				));
+				column[block.bind] = {
+					type: "measure",
+					inverse: false,
+				};
 				break;
 
-			case "gate": {
-				const [min, max] = block.binds
-					.reduce(
-						([min, max], v) => [Math.min(min, v), Math.max(max, v)],
-						[block.binds[0], block.binds[0]],
-					);
-				column = column.map((tile, i) => ({
-					type: "wire",
-					crossing: min < i && i < max ? "wire" : null,
-					wire: endingWire(tile),
-				}));
+			case "gate":
+				for (let i = min + 1; i < max; i++)
+					if (column[i].type == "wire")
+						(column[i] as any).crossing = "wire";
 
 				for (let i = 0; i < GATE_BLOCKS[block.gate].binds.length; i++) {
 					const y = block.binds[i];
@@ -118,52 +127,59 @@ export function calcTiles(
 				}
 
 				break;
-			}
 
-			case "oracle": {
-				const min = Math.min(block.xBind, block.firstBind);
-				const max = Math.max(block.xBind, block.firstBind + block.width - 1);
+			case "oracle":
+				for (let i = min + 1; i < max; i++)
+					if (column[i].type == "wire")
+						(column[i] as any).crossing = "wire";
 
-				column = column.map((tile, i) =>
-					i < block.firstBind || i >= block.firstBind + block.width
-						? (
-								i == block.xBind
-									? {
-											type: "gate",
-											label: "x",
-											input: null,
-											connect: {
-												up: false,
-												down: false,
-											},
-											control: {
-												up: min < i,
-												down: max > i,
-											},
-											wire: endingWire(tile),
-										}
-									: {
-											type: "wire",
-											crossing: min < i && i < max ? "wire" : null,
-											wire: endingWire(tile),
-										}
-							)
-						: {
-								type: "control",
-								control: {
-									up: min < i,
-									down: max > i,
-								},
-								negative: !((1 << (i - block.firstBind)) & block.match),
-								wire: endingWire(tile),
-							}
-				);
+				column[block.xBind] = {
+					type: "gate",
+					label: "x",
+					input: null,
+					connect: {
+						up: false,
+						down: false,
+					},
+					control: {
+						up: min < block.xBind,
+						down: max > block.xBind,
+					},
+					wire: endingWire(column[block.xBind]),
+				};
+
+				for (let i = 0; i < block.width; i++) {
+					const y = block.firstBind + i;
+					column[y] = {
+						type: "control",
+						control: {
+							up: min < y,
+							down: max > y,
+						},
+						negative: !((1 << i) & block.match),
+						wire: endingWire(column[y]),
+					};
+				}
 
 				break;
-			}
 		}
 
-		tiles.forEach((row, i) => row.push(column[i]));
+		if (++x < blocks.length) {
+			filled = filled.union(rangeInclusive(min, max));
+			[min, max] = bounds(blocks[x], channels);
+			if (compact && filled.isDisjointFrom(rangeInclusive(min, max)))
+				continue;
+		}
+
+		filled = new Set();
+		tiles.forEach((row, i) => {
+			row.push(column[i]);
+			column[i] = {
+				type: "wire",
+				crossing: null,
+				wire: endingWire(column[i]),
+			};
+		});
 	}
 
 	return tiles;
