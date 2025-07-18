@@ -1,0 +1,15 @@
+.block-type {
+	margin-bottom: 8px;
+}
+
+.block-type, .props input {
+	box-sizing: border-box;
+	width: 100%;
+}
+
+.props {
+	display: grid;
+	align-items: center;
+	grid-template-columns: auto 1fr;
+	gap: 4px 8px;
+}
